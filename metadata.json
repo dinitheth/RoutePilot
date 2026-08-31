@@ -1,0 +1,6 @@
+{
+  "name": "RoutePilot",
+  "description": "Autonomous real-world task agent for completing messy, multi-step errands and missions powered by Gemini and Google Maps Platform.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
