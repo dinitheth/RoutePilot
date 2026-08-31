@@ -8,9 +8,13 @@ const EVENTS_FILE = path.join(DATA_DIR, 'events.json');
 const VERSIONS_FILE = path.join(DATA_DIR, 'versions.json');
 const RUNS_FILE = path.join(DATA_DIR, 'runs.json');
 
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+// Ensure data directory exists (handled safely for serverless environments like Vercel)
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch (e) {
+  // Read-only filesystem in serverless environments (e.g. AWS Lambda / Vercel) - uses memory cache
 }
 
 // In-memory Firestore cache synchronized with filesystem
