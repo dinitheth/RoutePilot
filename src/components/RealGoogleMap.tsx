@@ -19,6 +19,28 @@ interface RealGoogleMapProps {
   onOpen3DPopview?: (stop: ItineraryStop) => void;
 }
 
+export function calculateHaversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Earth radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+export function formatLegDistance(distKm: number): string {
+  if (distKm >= 1) {
+    return `${distKm.toFixed(1)} km`;
+  }
+  const meters = Math.max(50, Math.round(distKm * 1000));
+  return `${meters} m`;
+}
+
 /**
  * Helper function to calculate the LatLngBounds of all mission waypoints
  * with optional origin and validation.
@@ -423,7 +445,7 @@ export const RealGoogleMap: React.FC<RealGoogleMapProps> = ({
       }
     });
 
-    // Draw single clean route polyline directly
+    // Draw single clean route polyline directly & 3D Leg Distance Badges
     if (pathCoordinates.length > 1 && map) {
       const polyline = new google.maps.Polyline({
         path: pathCoordinates,
@@ -435,6 +457,64 @@ export const RealGoogleMap: React.FC<RealGoogleMapProps> = ({
 
       polyline.setMap(map);
       polylineRef.current = polyline;
+
+      // Render 3D Distance Badges (KM or M) at the midpoint of each segment
+      for (let i = 0; i < stops.length - 1; i++) {
+        const fromStop = stops[i];
+        const toStop = stops[i + 1];
+
+        const midLat = (fromStop.lat + toStop.lat) / 2;
+        const midLng = (fromStop.lng + toStop.lng) / 2;
+        const position = { lat: midLat, lng: midLng };
+
+        const distKm =
+          toStop.travelDistanceKm && toStop.travelDistanceKm > 0
+            ? toStop.travelDistanceKm
+            : calculateHaversineDistanceKm(fromStop.lat, fromStop.lng, toStop.lat, toStop.lng);
+
+        const distFormatted = formatLegDistance(distKm);
+        const timeMinutes = toStop.travelFromPrevMinutes || Math.max(1, Math.round(distKm * 2.2));
+
+        // Bearing angle for directional arrow
+        const y = Math.sin(((toStop.lng - fromStop.lng) * Math.PI) / 180) * Math.cos((toStop.lat * Math.PI) / 180);
+        const x =
+          Math.cos((fromStop.lat * Math.PI) / 180) * Math.sin((toStop.lat * Math.PI) / 180) -
+          Math.sin((fromStop.lat * Math.PI) / 180) *
+            Math.cos((toStop.lat * Math.PI) / 180) *
+            Math.cos(((toStop.lng - fromStop.lng) * Math.PI) / 180);
+        const bearingDeg = (Math.atan2(y, x) * 180) / Math.PI;
+
+        if (AdvancedMarker) {
+          const legContainer = document.createElement('div');
+          legContainer.className = 'tactical-leg-distance-container';
+          legContainer.style.transform = `perspective(800px) rotateX(${is3DTilted ? 26 : 0}deg)`;
+          legContainer.innerHTML = `
+            <div class="tactical-leg-distance-pill" title="Leg: ${fromStop.placeName} ➔ ${toStop.placeName} (${distFormatted})">
+              <div class="tactical-leg-chevron" style="transform: rotate(${Math.round(bearingDeg - 90)}deg);">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"></polyline></svg>
+              </div>
+              <span class="tactical-leg-dist-text">${distFormatted}</span>
+              <span class="tactical-leg-divider">|</span>
+              <span class="tactical-leg-time-text">${timeMinutes}m</span>
+            </div>
+          `;
+
+          const legMarker = new AdvancedMarker({
+            map,
+            position,
+            title: `Distance: ${distFormatted}`,
+            content: legContainer,
+            zIndex: 50,
+            gmpClickable: true,
+          });
+
+          legMarker.addListener('click', () => {
+            onSelectStop(toStop);
+          });
+
+          markersRef.current.push(legMarker);
+        }
+      }
     }
 
     const isNewMission = mission?.id && mission.id !== prevMissionIdRef.current;

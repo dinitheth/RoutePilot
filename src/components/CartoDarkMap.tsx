@@ -10,6 +10,28 @@ interface CartoDarkMapProps {
   is3DTilted: boolean;
 }
 
+function calculateHaversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Earth radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function formatLegDistance(distKm: number): string {
+  if (distKm >= 1) {
+    return `${distKm.toFixed(1)} km`;
+  }
+  const meters = Math.max(50, Math.round(distKm * 1000));
+  return `${meters} m`;
+}
+
 export const CartoDarkMap: React.FC<CartoDarkMapProps> = ({
   mission,
   selectedStop,
@@ -237,7 +259,7 @@ export const CartoDarkMap: React.FC<CartoDarkMapProps> = ({
       markersGroup.addLayer(marker);
     });
 
-    // Render smooth glow polyline
+    // Render smooth glow polyline & 3D Leg Distance Badges
     if (latLngs.length > 1) {
       const polyline = L.polyline(latLngs, {
         color: '#10b981',
@@ -248,6 +270,74 @@ export const CartoDarkMap: React.FC<CartoDarkMapProps> = ({
       }).addTo(map);
 
       polylineRef.current = polyline;
+
+      // Render 3D Distance Badges (KM or M) at the midpoint of each segment
+      for (let i = 0; i < stops.length - 1; i++) {
+        const fromStop = stops[i];
+        const toStop = stops[i + 1];
+
+        const midLat = (fromStop.lat + toStop.lat) / 2;
+        const midLng = (fromStop.lng + toStop.lng) / 2;
+
+        const distKm =
+          toStop.travelDistanceKm && toStop.travelDistanceKm > 0
+            ? toStop.travelDistanceKm
+            : calculateHaversineDistanceKm(fromStop.lat, fromStop.lng, toStop.lat, toStop.lng);
+
+        const distFormatted = formatLegDistance(distKm);
+        const timeMinutes = toStop.travelFromPrevMinutes || Math.max(1, Math.round(distKm * 2.2));
+
+        // Bearing angle for directional arrow
+        const y = Math.sin(((toStop.lng - fromStop.lng) * Math.PI) / 180) * Math.cos((toStop.lat * Math.PI) / 180);
+        const x =
+          Math.cos((fromStop.lat * Math.PI) / 180) * Math.sin((toStop.lat * Math.PI) / 180) -
+          Math.sin((fromStop.lat * Math.PI) / 180) *
+            Math.cos((toStop.lat * Math.PI) / 180) *
+            Math.cos(((toStop.lng - fromStop.lng) * Math.PI) / 180);
+        const bearingDeg = (Math.atan2(y, x) * 180) / Math.PI;
+
+        const distanceBadgeHtml = `
+          <div class="tactical-leg-distance-container" style="transform: perspective(800px) rotateX(${is3DTilted ? 26 : 0}deg);">
+            <div class="tactical-leg-distance-pill" id="leg-badge-${fromStop.stopNumber}-${toStop.stopNumber}">
+              <div class="tactical-leg-chevron" style="transform: rotate(${Math.round(bearingDeg - 90)}deg);">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"></polyline></svg>
+              </div>
+              <span class="tactical-leg-dist-text">${distFormatted}</span>
+              <span class="tactical-leg-divider">|</span>
+              <span class="tactical-leg-time-text">${timeMinutes}m</span>
+            </div>
+          </div>
+        `;
+
+        const distanceIcon = L.divIcon({
+          className: 'tactical-leg-marker-icon',
+          html: distanceBadgeHtml,
+          iconSize: [90, 26],
+          iconAnchor: [45, 13],
+        });
+
+        const legMarker = L.marker([midLat, midLng], {
+          icon: distanceIcon,
+          zIndexOffset: 50,
+        });
+
+        legMarker.bindTooltip(
+          `<div class="text-xs font-mono font-bold text-emerald-400">LEG // 0${fromStop.stopNumber} ➔ 0${toStop.stopNumber}</div>
+           <div class="text-[11px] text-zinc-300 font-medium">${fromStop.placeName} ➔ ${toStop.placeName}</div>
+           <div class="text-[10px] text-zinc-400 mt-0.5">Distance: <span class="text-zinc-200 font-bold">${distFormatted}</span> • Travel: ~${timeMinutes} mins</div>`,
+          {
+            direction: 'top',
+            offset: [0, -14],
+            className: 'tactical-leg-tooltip',
+          }
+        );
+
+        legMarker.on('click', () => {
+          onSelectStop(toStop);
+        });
+
+        markersGroup.addLayer(legMarker);
+      }
     }
 
     // Fit bounds smoothly
